@@ -1743,7 +1743,7 @@ async function fetchAndSyncVestiges() {
 
   try {
     // Appel direct au Worker Proxy, sans en-tête d'authentification
-    const response = await fetch(PROXY_API_URL + apiPath, {
+    const response = await fetch(FM_URL + apiPath, {
       method: 'GET',
       // Le Content-Type n'est pas nécessaire pour un GET simple.
     });
