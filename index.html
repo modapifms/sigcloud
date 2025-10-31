@@ -1695,161 +1695,148 @@ map.whenReady(function() {
     // La bo&icirc;te est r&eacute;duite.
 });
 </script>
-
 <script>
 // =========================================================================
 // --- LOGIQUE FILEMAKER (SYNCHRONISATION UNIDIRECTIONNELLE DES ATTRIBUTS) ---
 // =========================================================================
-var FM_URL = 'https://fm-proxy-cournon3.modapifms.workers.dev/api/fm/Base_test_cournon_SIG'; // 💡 Changé de const à var
-var FM_LAYOUT = 'Modapi'; // 💡 Changé de const à var
-var FM_KEY_FIELD = 'fait'; // 💡 Changé de const à var
-var FM_TOKEN = null; // C'est une variable qui change, donc 'let' est correct, mais 'var' fonctionnerait aussi.
-var POLLING_INTERVAL = 15000; // 15 s // 💡 Changé de const à var
 
-// --- Authentification ---
-async function getFileMakerToken() {
-  if (FM_TOKEN) return FM_TOKEN;
-  const authHeader = 'Basic ' + btoa(`${FM_USERNAME}:${FM_PASSWORD}`);
-  try {
-    const response = await fetch(`${FM_URL}/sessions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': authHeader }
-    });
-    if (!response.ok) throw new Error(`Erreur API: ${response.status}`);
-    const data = await response.json();
-    FM_TOKEN = data.response.token;
-    console.log("✅ Jeton FileMaker obtenu");
-    return FM_TOKEN;
-  } catch (e) {
-    console.error("❌ Erreur d'authentification FileMaker:", e);
-    return null;
-  }
-}
+// REMPLACER cette URL par l'URL réelle de votre Cloudflare Worker Proxy
+// Ce Worker contient les secrets FM_USERNAME et FM_PASSWORD.
+var PROXY_API_URL = 'https://fm-proxy-cournon3.modapifms.workers.dev/'; 
+
+// Le chemin de base de l'API FileMaker DATA après le FM_HOST (défini dans le Worker)
+// Le Worker construit l'URL finale à partir de cette base.
+var FM_LAYOUT = 'Modapi';
+var FM_KEY_FIELD = 'fait';
+var POLLING_INTERVAL = 15000; // 15 s 
+
+// ATTENTION: La fonction getFileMakerToken() N'EST PLUS NÉCESSAIRE 
+// car le Worker gère l'authentification pour nous.
 
 // --- Mise à jour des propriétés des entités ---
 function updateFeatureProperties(currentFeature, fmRecord) {
-  const f = fmRecord.fieldData;
+  const f = fmRecord.fieldData;
 
-  // Normalisation insensible à la casse
-  const phaseValue = f.Phase ?? f.phase ?? f.PHASE ?? null;
-  const typeValue  = f.Type  ?? f.type  ?? f.TYPE  ?? null;
- 
- // 💡 Correction : Extraction des données MOBILIER C et MOBILIER F
-  const mobilierCVal = f['Mobilier C'] ?? f['Mobilier_C'] ?? null; // Adapter le nom du champ FileMaker si nécessaire (ex: Mobilier_C)
-  const mobilierFVal = f['Mobilier F'] ?? f['Mobilier_F'] ?? null;
+  // Normalisation insensible à la casse
+  const phaseValue = f.Phase ?? f.phase ?? f.PHASE ?? null;
+  const typeValue  = f.Type  ?? f.type  ?? f.TYPE  ?? null;
+ 
+  // Correction : Extraction des données MOBILIER C et MOBILIER F
+  const mobilierCVal = f['Mobilier C'] ?? f['Mobilier_C'] ?? null;
+  const mobilierFVal = f['Mobilier F'] ?? f['Mobilier_F'] ?? null;
 
-  currentFeature.properties['Phase'] = phaseValue;
-  currentFeature.properties['Type']  = typeValue;
-  currentFeature.properties[FM_KEY_FIELD] = f[FM_KEY_FIELD];
-  
-  // 💡 Correction : Application des données MOBILIER C et MOBILIER F
-  currentFeature.properties['Mobilier C'] = mobilierCVal;
-  currentFeature.properties['Mobilier F'] = mobilierFVal;
+  currentFeature.properties['Phase'] = phaseValue;
+  currentFeature.properties['Type']  = typeValue;
+  currentFeature.properties[FM_KEY_FIELD] = f[FM_KEY_FIELD];
+  
+  // Correction : Application des données MOBILIER C et MOBILIER F
+  currentFeature.properties['Mobilier C'] = mobilierCVal;
+  currentFeature.properties['Mobilier F'] = mobilierFVal;
 }
 
 
 // --- Synchronisation des données FileMaker vers la carte ---
-async function fetchAndSyncVestiges(token) {
-  if (!token) return;
-  try {
-    const response = await fetch(`${FM_URL}/layouts/${FM_LAYOUT}/records`, {
-      method: 'GET',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` }
+async function fetchAndSyncVestiges() {
+  
+  // Le chemin de l'API FileMaker que le Worker doit atteindre.
+  const apiPath = `layouts/${FM_LAYOUT}/records`;
+
+  try {
+    // Appel direct au Worker Proxy, sans en-tête d'authentification
+    const response = await fetch(PROXY_API_URL + apiPath, {
+      method: 'GET',
+      // Le Content-Type n'est pas nécessaire pour un GET simple.
+    });
+    
+    // Le Worker devrait gérer les erreurs d'authentification (401)
+    if (!response.ok) {
+        // Log l'erreur complète envoyée par le Worker ou par FileMaker
+        const errorText = await response.text();
+        throw new Error(`Erreur HTTP/Proxy: ${response.status} - ${errorText.substring(0, 100)}...`);
+    }
+    
+    const fmData = await response.json();
+    const fmRecords = fmData.response.data;
+    let matchCount = 0;
+
+    // Parcours de chaque entité de la couche
+    layer_Vestiges_2.eachLayer(layer => {
+        const currentFait = String(layer.feature.properties[FM_KEY_FIELD] || '').trim().toLowerCase();
+
+        // Recherche tolérante : ignore casse et espaces
+        const fmRecord = fmRecords.find(r =>
+            String(r.fieldData[FM_KEY_FIELD] || '').trim().toLowerCase() === currentFait
+        );
+
+        if (fmRecord) {
+            updateFeatureProperties(layer.feature, fmRecord);
+
+            // Forcer la mise à jour du popup
+            const updatedPopup = `
+                <table>
+                <tr><th>FAIT</th><td>${layer.feature.properties['fait'] ?? ''}</td></tr>
+                <tr><th>PHASE</th><td>${layer.feature.properties['Phase'] ?? ''}</td></tr>
+                <tr><th>TYPE</th><td>${layer.feature.properties['Type'] ?? ''}</td></tr>
+                <tr><th>MOBILIER C</th><td>${layer.feature.properties['Mobilier C'] ?? ''}</td></tr>
+                <tr><th>MOBILIER F</th><td>${layer.feature.properties['Mobilier F'] ?? ''}</td></tr>
+                </table>`;
+            layer.bindPopup(updatedPopup, { maxHeight: 400 });
+            if (layer.getPopup() && layer.getPopup().isOpen()) {
+                layer.getPopup().setContent(updatedPopup);
+            }
+
+            matchCount++;
+        } else {
+            // Diagnostic console pour comprendre les cas manquants
+            if (currentFait === 'sp1033') {
+                console.warn('⚠️ Aucun enregistrement FileMaker correspondant pour SP1033');
+            }
+        }
     });
 
-    if (response.status === 401) {
-      console.warn("⏳ Jeton expiré, reconnexion...");
-      FM_TOKEN = null;
-      const newToken = await getFileMakerToken();
-      if (newToken) await fetchAndSyncVestiges(newToken);
-      return;
-    }
 
-    if (!response.ok) throw new Error(`Erreur HTTP: ${response.status}`);
-    const fmData = await response.json();
-    const fmRecords = fmData.response.data;
-    let matchCount = 0;
+    // 🔁 Actualisation du filtre "Phase"
+    window.allVestiges = layer_Vestiges_2.toGeoJSON();
+    filterVestiges();
 
-    // Parcours de chaque entité de la couche
-layer_Vestiges_2.eachLayer(layer => {
-  const currentFait = String(layer.feature.properties[FM_KEY_FIELD] || '').trim().toLowerCase();
+    // 1. Remplir les menus déroulants avec les valeurs uniques
+    populateFilters(); 
 
-  // Recherche tolérante : ignore casse et espaces
-  const fmRecord = fmRecords.find(r =>
-    String(r.fieldData[FM_KEY_FIELD] || '').trim().toLowerCase() === currentFait
-  );
-
-  if (fmRecord) {
-    updateFeatureProperties(layer.feature, fmRecord);
-
-    // Forcer la mise à jour du popup
-    const updatedPopup = `
-      <table>
-        <tr><th>FAIT</th><td>${layer.feature.properties['fait'] ?? ''}</td></tr>
-        <tr><th>PHASE</th><td>${layer.feature.properties['Phase'] ?? ''}</td></tr>
-        <tr><th>TYPE</th><td>${layer.feature.properties['Type'] ?? ''}</td></tr>
-		<tr><th>MOBILIER C</th><td>${layer.feature.properties['Mobilier C'] ?? ''}</td></tr>
-		<tr><th>MOBILIER F</th><td>${layer.feature.properties['Mobilier F'] ?? ''}</td></tr>
-      </table>`;
-    layer.bindPopup(updatedPopup, { maxHeight: 400 });
-    if (layer.getPopup() && layer.getPopup().isOpen()) {
-      layer.getPopup().setContent(updatedPopup);
-    }
-
-    matchCount++;
-  } else {
-    // Diagnostic console pour comprendre les cas manquants
-    if (currentFait === 'SP1033') {
-      console.warn('⚠️ Aucun enregistrement FileMaker correspondant pour SP1033');
-    }
-  }
-});
+    // 2. Appliquer le filtre par défaut (qui est "Toutes") et mettre à jour le compteur
+    filterVestiges(); 
 
 
-    // 🔁 Actualisation du filtre "Phase"
-    window.allVestiges = layer_Vestiges_2.toGeoJSON();
-    filterVestiges();
-
-    // 1. Remplir les menus déroulants avec les valeurs uniques
-populateFilters(); 
-
-// 2. Appliquer le filtre par défaut (qui est "Toutes") et mettre à jour le compteur
-filterVestiges(); 
-
-
-    console.log(`✅ FileMaker: ${matchCount} entité(s) mises à jour.`);
-  } catch (e) {
-// ... (Fin de la fonction fetchAndSyncVestiges)
-  }
+    console.log(`✅ FileMaker: ${matchCount} entité(s) mises à jour.`);
+  } catch (e) {
+    console.error("❌ Erreur pendant la synchronisation:", e);
+  }
 }
 
 // --- Polling stable avec verrouillage ---
 let isSyncing = false;
 
 map.whenReady(async function() {
-  console.log("🔄 Démarrage du polling FileMaker stable...");
+  console.log("🔄 Démarrage du polling FileMaker stable...");
 
-  const token = await getFileMakerToken();
-  if (!token) return;
+  // Première synchronisation immédiate
+  await fetchAndSyncVestiges();
 
-  // Première synchronisation
-  await fetchAndSyncVestiges(token);
-
-  // Intervalle régulier (sécurisé)
-  setInterval(async () => {
-    if (isSyncing) return;
-    isSyncing = true;
-    try {
-      const currentToken = await getFileMakerToken();
-      await fetchAndSyncVestiges(currentToken);
-    } catch (e) {
-      console.error("Erreur pendant la synchro périodique:", e);
-    } finally {
-      isSyncing = false;
-    }
-  }, POLLING_INTERVAL);
+  // Intervalle régulier (sécurisé)
+  setInterval(async () => {
+    if (isSyncing) return;
+    isSyncing = true;
+    try {
+      // Plus besoin de getFileMakerToken()
+      await fetchAndSyncVestiges();
+    } catch (e) {
+      console.error("Erreur pendant la synchro périodique:", e);
+    } finally {
+      isSyncing = false;
+    }
+  }, POLLING_INTERVAL);
 });
 </script>
+
 	<div id="coord-display" style="
     position:absolute; 
     bottom:10px; 
