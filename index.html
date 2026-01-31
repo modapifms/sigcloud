@@ -83,8 +83,22 @@
     display: block;
     width: 100%;
 ">
-    &#x1F3FA; Afficher Céramiques par Fait
+    🏺 Afficher Céramiques par Fait
 </button>
+<button id="faunaCountBtn" style="
+    margin-top:10px;
+    background:#4CAF50; /* Couleur Faune */
+    color:white;
+    border:none;
+    border-radius:4px;
+    padding:6px 10px;
+    cursor:pointer;
+    display: block;
+    width: 100%;
+">
+    🦴 Afficher Faunes par Fait
+</button>
+
 </div>
 <div id="ceramic-results-container" style="
     position: absolute; 
@@ -101,10 +115,29 @@
     width: 250px;
     display: none; /* Masqué par défaut */
 ">
-    <h4 style="margin: 0 0 10px 0;">&#x1F3FA; Totaux Céramiques par Critère</h4>
+    <h4 style="margin: 0 0 10px 0;">🏺 Totaux Céramiques par Critère</h4>
     <div id="ceramic-results-content">
         </div>
 </div>
+<div id="fauna-results-container" style="
+    position: absolute; 
+    top: 10px;
+    left: 580px;
+    z-index: 9999; 
+    background: rgba(255, 255, 255, 0.95); 
+    padding: 10px; 
+    border-radius: 5px; 
+    box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+    font-family: Arial, sans-serif;
+    max-height: 400px;
+    overflow-y: auto;
+    width: 250px;
+    display: none;
+">
+    <h4 style="margin: 0 0 10px 0;">🦴 Totaux Faunes par Critère</h4>
+    <div id="fauna-results-content"></div>
+</div>
+
 <div id="legend-content" style="
     /* ⚠️ Ces styles sont pour l'apparence, la position est gérée par le JS de Leaflet */
     background: white; 
@@ -1998,6 +2031,7 @@ document.getElementById('downloadShpBtn').addEventListener('click', function() {
 // 0. Variables Globales et Utilitaires (inchangé)
 // =================================================================
 let ceramicCirclesLayer = null; 
+let faunaCirclesLayer = null;
 
 /**
  * Extrait les coordonnées d'un point représentatif de la géométrie (premier sommet).
@@ -2040,7 +2074,7 @@ function showCeramicQuantities() {
 
     if (resultsContainer.style.display === 'block') {
         resultsContainer.style.display = 'none';
-        btn.textContent = '&#x1F3FA; Afficher Céramiques par Fait';
+        btn.textContent = '🏺 Afficher Céramiques par Fait';
         if (ceramicCirclesLayer) {
             map.removeLayer(ceramicCirclesLayer);
             ceramicCirclesLayer = null;
@@ -2050,7 +2084,7 @@ function showCeramicQuantities() {
     
     resultsContent.innerHTML = 'Chargement des données de dispersion...';
     resultsContainer.style.display = 'block';
-    btn.textContent = '&#x2715; Cacher la Dispersion';
+    btn.textContent = '✖ Cacher la Dispersion';
 
     if (typeof json_Vestiges_2 !== 'undefined' && json_Vestiges_2.features.length > 0) {
         const featuresToProcess = window.layer_Vestiges_2_Filtered 
@@ -2065,6 +2099,40 @@ function showCeramicQuantities() {
         resultsContent.innerHTML = 'Erreur: Les données de Vestiges ne sont pas disponibles.';
         console.error("Erreur DATA: json_Vestiges_2 non défini ou vide. Les données GeoJSON ne sont pas chargées.");
     }
+}
+function showFaunaQuantities() {
+    const resultsContainer = document.getElementById('fauna-results-container');
+    const resultsContent = document.getElementById('fauna-results-content');
+    const btn = document.getElementById('faunaCountBtn');
+
+    if (resultsContainer.style.display === 'block') {
+        resultsContainer.style.display = 'none';
+        btn.textContent = '🦴 Afficher Faunes par Fait';
+        if (faunaCirclesLayer) {
+            map.removeLayer(faunaCirclesLayer);
+            faunaCirclesLayer = null;
+        }
+        return;
+    }
+
+    resultsContent.innerHTML = 'Chargement des données de dispersion...';
+    resultsContainer.style.display = 'block';
+    btn.textContent = '✖ Cacher la Dispersion';
+
+    const featuresToProcess = window.layer_Vestiges_2_Filtered
+        ? window.layer_Vestiges_2_Filtered.toGeoJSON().features
+        : json_Vestiges_2.features;
+
+    displayFaunaDispersion(featuresToProcess);
+
+    resultsContent.innerHTML = `
+   
+      <p>
+        Affichage de la dispersion par vestige.
+        La taille de chaque cercle est proportionnelle
+        à la quantité de faune du vestige.
+    </p>
+    `;
 }
 
 
@@ -2155,7 +2223,7 @@ function displayCeramicDispersion(features) {
         ceramicCirclesLayer = L.layerGroup(circles).addTo(map);
         
         if (typeof layer_control !== 'undefined' && layer_control.addOverlay) {
-            layer_control.addOverlay(ceramicCirclesLayer, '&#x1F3FA; Dispersion Céramique');
+            layer_control.addOverlay(ceramicCirclesLayer, '🏺 Dispersion Céramique');
         }
         
         if (circles.length === 1) {
@@ -2172,16 +2240,88 @@ function displayCeramicDispersion(features) {
         }
     }
 }
+function displayFaunaDispersion(features) {
+
+    if (faunaCirclesLayer) {
+        map.removeLayer(faunaCirclesLayer);
+    }
+
+    const circles = [];
+    const quantities = [];
+
+    const faunaFeatures = features.filter(feature => {
+        const mobilierF = feature.properties['Mobilier F'];
+        let quantity = 0;
+
+        if (mobilierF) {
+            if (typeof mobilierF === 'string' && mobilierF.includes(',')) {
+                quantity = mobilierF.split(',').reduce(
+                    (sum, v) => sum + (parseInt(v.trim()) || 0), 0
+                );
+            } else {
+                quantity = parseInt(mobilierF) || 0;
+            }
+        }
+
+        if (quantity > 0) {
+            feature.properties._Faune_Qty = quantity;
+            quantities.push(quantity);
+            return true;
+        }
+        return false;
+    });
+
+    if (faunaFeatures.length === 0) {
+        document.getElementById('fauna-results-content').innerHTML =
+            '<p>Aucun vestige avec des quantités de faune positives.</p>';
+        return;
+    }
+
+    const maxQty = Math.max(...quantities);
+
+    faunaFeatures.forEach(feature => {
+        const location = getFeatureLocation(feature);
+        if (!location) return;
+
+        const quantity = feature.properties._Faune_Qty;
+        const faitValue = feature.properties['Fait'] || 'N/D';
+        const typeValue = feature.properties['Type'] || 'N/D';
+
+        const radius = 3 + (quantity / maxQty) * 27;
+
+        const popupContent = `
+            <b>Vestige Type :</b> ${typeValue}<br>
+            <b>Fait :</b> ${faitValue}<br>
+            <b>Quantité Faune :</b> ${quantity}
+        `;
+
+        const circle = L.circle(location, {
+            color: '#2E7D32',
+            fillColor: '#81C784',
+            fillOpacity: 0.35,
+            radius: radius
+        }).bindPopup(popupContent);
+
+        circles.push(circle);
+    });
+
+    faunaCirclesLayer = L.layerGroup(circles).addTo(map);
+}
 
 // 5. Lier la fonction au bouton lors du chargement de la page (inchangé)
 document.addEventListener('DOMContentLoaded', () => {
+
     const ceramicBtn = document.getElementById('ceramicCountBtn');
     if (ceramicBtn) {
         ceramicBtn.addEventListener('click', showCeramicQuantities);
-    } else {
-        console.error("Erreur de liaison: Le bouton avec l'ID 'ceramicCountBtn' n'a pas été trouvé.");
+    }
+
+    const faunaBtn = document.getElementById('faunaCountBtn');
+    if (faunaBtn) {
+        faunaBtn.addEventListener('click', showFaunaQuantities);
     }
 });
+
 </script>
 <script>
 // =========================================================================
